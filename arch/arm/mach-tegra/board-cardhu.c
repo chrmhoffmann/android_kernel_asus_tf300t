@@ -468,83 +468,50 @@ static struct uart_clk_parent uart_parent_clk[] = {
 static struct tegra_uart_platform_data cardhu_uart_pdata;
 static struct tegra_uart_platform_data cardhu_loopback_uart_pdata;
 
+static unsigned int debug_uart_port_irq;
+
+static char *uart_names[] = {
+	"uarta",
+	"uartb",
+	"uartc",
+	"uartd",
+	"uarte",
+};
+
+static struct platform_device *debug_uarts[] = {
+	&debug_uarta_device,
+	&debug_uartb_device,
+	&debug_uartc_device,
+	&debug_uartd_device,
+	&debug_uarte_device,
+};
+
 static void __init uart_debug_init(void)
 {
-	struct board_info board_info;
 	int debug_port_id;
-
-	tegra_get_board_info(&board_info);
+	struct platform_device *debug_uart;
 
 	debug_port_id = get_tegra_uart_debug_port_id();
-	if (debug_port_id < 0) {
+
+	if (debug_port_id < 0)
 		debug_port_id = 0;
-			/* UARTB is debug port
-			 *       for SLT - E1186/E1187/PM269
-			 *       for E1256/E1257
-			 */
-		if (((board_info.sku & SKU_SLT_ULPI_SUPPORT) &&
-			((board_info.board_id == BOARD_E1186) ||
-			(board_info.board_id == BOARD_E1187) ||
-			(board_info.board_id == BOARD_PM269))) ||
-			(board_info.board_id == BOARD_E1256) ||
-			(board_info.board_id == BOARD_E1257))
-				debug_port_id = 1;
+	else if (debug_port_id >= ARRAY_SIZE(debug_uarts)) {
+		pr_info("The debug console id %d is invalid, Assuming UARTA",
+			debug_port_id);
+		debug_port_id = 0;
 	}
 
-	switch (debug_port_id) {
-	case 0:
-		/* UARTA is the debug port. */
-		pr_info("Selecting UARTA as the debug console\n");
-		cardhu_uart_devices[0] = &debug_uarta_device;
-		debug_uart_clk = clk_get_sys("serial8250.0", "uarta");
-		debug_uart_port_base = ((struct plat_serial8250_port *)(
-			debug_uarta_device.dev.platform_data))->mapbase;
-		break;
+	pr_info("Selecting %s as the debug port\n",
+		uart_names[debug_port_id]);
 
-	case 1:
-		/* UARTB is the debug port. */
-		pr_info("Selecting UARTB as the debug console\n");
-		cardhu_uart_devices[1] = &debug_uartb_device;
-		debug_uart_clk =  clk_get_sys("serial8250.0", "uartb");
-		debug_uart_port_base = ((struct plat_serial8250_port *)(
-			debug_uartb_device.dev.platform_data))->mapbase;
-		break;
+	debug_uart_clk = clk_get_sys("serial8250.0",
+					uart_names[debug_port_id]);
+	debug_uart = debug_uarts[debug_port_id];
+	debug_uart_port_base = ((struct plat_serial8250_port *)(
+			debug_uart->dev.platform_data))->mapbase;
+	debug_uart_port_irq = ((struct plat_serial8250_port *)(
+			debug_uart->dev.platform_data))->irq;
 
-	case 2:
-		/* UARTC is the debug port. */
-		pr_info("Selecting UARTC as the debug console\n");
-		cardhu_uart_devices[2] = &debug_uartc_device;
-		debug_uart_clk =  clk_get_sys("serial8250.0", "uartc");
-		debug_uart_port_base = ((struct plat_serial8250_port *)(
-			debug_uartc_device.dev.platform_data))->mapbase;
-		break;
-
-	case 3:
-		/* UARTD is the debug port. */
-		pr_info("Selecting UARTD as the debug console\n");
-		cardhu_uart_devices[3] = &debug_uartd_device;
-		debug_uart_clk =  clk_get_sys("serial8250.0", "uartd");
-		debug_uart_port_base = ((struct plat_serial8250_port *)(
-			debug_uartd_device.dev.platform_data))->mapbase;
-		break;
-
-	case 4:
-		/* UARTE is the debug port. */
-		pr_info("Selecting UARTE as the debug console\n");
-		cardhu_uart_devices[4] = &debug_uarte_device;
-		debug_uart_clk =  clk_get_sys("serial8250.0", "uarte");
-		debug_uart_port_base = ((struct plat_serial8250_port *)(
-			debug_uarte_device.dev.platform_data))->mapbase;
-		break;
-
-	default:
-		pr_info("The debug console id %d is invalid, Assuming UARTA", debug_port_id);
-		cardhu_uart_devices[0] = &debug_uarta_device;
-		debug_uart_clk = clk_get_sys("serial8250.0", "uarta");
-		debug_uart_port_base = ((struct plat_serial8250_port *)(
-			debug_uarta_device.dev.platform_data))->mapbase;
-		break;
-	}
 	return;
 }
 
