@@ -451,7 +451,6 @@ static void cardhu_i2c_init(void)
 }
 
 static struct platform_device *cardhu_uart_devices[] __initdata = {
-	&tegra_uarta_device,
 	&tegra_uartb_device,
 	&tegra_uartc_device,
 	&tegra_uartd_device,
@@ -536,7 +535,6 @@ static void __init cardhu_uart_init(void)
 	cardhu_loopback_uart_pdata.parent_clk_count =
 						ARRAY_SIZE(uart_parent_clk);
 	cardhu_loopback_uart_pdata.is_loopback = true;
-	tegra_uarta_device.dev.platform_data = &cardhu_uart_pdata;
 	tegra_uartb_device.dev.platform_data = &cardhu_uart_pdata;
 	tegra_uartc_device.dev.platform_data = &cardhu_uart_pdata;
 	tegra_uartd_device.dev.platform_data = &cardhu_uart_pdata;
@@ -563,6 +561,9 @@ static void __init cardhu_uart_init(void)
 					debug_uart_clk->name);
 		}
 	}
+
+	tegra_serial_debug_init(debug_uart_port_base, debug_uart_port_irq,
+				debug_uart_clk, -1, -1, false);
 
 	platform_add_devices(cardhu_uart_devices,
 				ARRAY_SIZE(cardhu_uart_devices));
