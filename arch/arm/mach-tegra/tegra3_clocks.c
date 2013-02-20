@@ -33,6 +33,7 @@
 
 #include <mach/iomap.h>
 #include <mach/edp.h>
+#include <mach/board-cardhu-misc.h>
 
 #include "clock.h"
 #include "fuse.h"
@@ -4052,7 +4053,7 @@ static struct clk tegra_clk_pclk = {
 	.min_rate       = 12000000,
 };
 
-static struct raw_notifier_head sbus_rate_change_nh;
+static RAW_NOTIFIER_HEAD(sbus_rate_change_nh);
 
 static struct clk tegra_clk_sbus_cmplx = {
 	.name	   = "sbus",
@@ -4196,7 +4197,7 @@ static struct clk_mux_sel mux_plla_clk32_pllp_clkm_plle[] = {
 	{ 0, 0},
 };
 
-static struct raw_notifier_head emc_rate_change_nh;
+static RAW_NOTIFIER_HEAD(emc_rate_change_nh);
 
 static struct clk tegra_clk_emc = {
 	.name = "emc",
@@ -4898,16 +4899,39 @@ struct tegra_cpufreq_table_data *tegra_cpufreq_table_get(void)
  * respective emc rate should be above TEGRA_EMC_BRIDGE_RATE_MIN
  */
 /* FIXME: explicitly check this dependency */
+extern int  gps_enable;
 unsigned long tegra_emc_to_cpu_ratio(unsigned long cpu_rate)
 {
 	static unsigned long emc_max_rate = 0;
+	unsigned int project_id = tegra3_get_project_id();
 
 	if (emc_max_rate == 0)
 		emc_max_rate = clk_round_rate(
 			tegra_get_clock_by_name("emc"), ULONG_MAX);
 
+	if(TEGRA3_PROJECT_TF201 == project_id)
+	{
 	/* Vote on memory bus frequency based on cpu frequency;
 	   cpu rate is in kHz, emc rate is in Hz */
+		 if(!gps_enable){
+			if (cpu_rate >= 925000)
+				return emc_max_rate;	/* cpu >= 925 MHz, emc max */
+			else if (cpu_rate >= 450000)
+				return emc_max_rate/2;	/* cpu >= 450 MHz, emc max/2 */
+			else if (cpu_rate >= 250000)
+				return 100000000;	/* cpu >= 250 MHz, emc 100 MHz */
+			else
+				return 0;		/* emc min */
+		}
+		else{
+			if (cpu_rate >= 925000)
+				return emc_max_rate;	/* cpu >= 925 MHz, emc max */
+			else
+				return emc_max_rate/2;
+		}
+	}
+	else
+	{
 	if (cpu_rate >= 925000)
 		return emc_max_rate;	/* cpu >= 925 MHz, emc max */
 	else if (cpu_rate >= 450000)
@@ -4916,6 +4940,7 @@ unsigned long tegra_emc_to_cpu_ratio(unsigned long cpu_rate)
 		return 100000000;	/* cpu >= 250 MHz, emc 100 MHz */
 	else
 		return 0;		/* emc min */
+}
 }
 
 int tegra_update_mselect_rate(unsigned long cpu_rate)

@@ -22,6 +22,7 @@
 #include <linux/usb/otg.h>
 #include <mach/usb_phy.h>
 #include <mach/iomap.h>
+#include <../tegra_usb_phy.h>
 
 #if 0
 #define EHCI_DBG(stuff...)	pr_info("ehci-tegra: " stuff)
@@ -285,6 +286,8 @@ static void tegra_ehci_shutdown(struct usb_hcd *hcd)
 {
 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
 	struct tegra_ehci_hcd *tegra = dev_get_drvdata(hcd->self.controller);
+
+	pr_info("%s instance %d +\n", __func__, tegra->phy->inst);
 	mutex_lock(&tegra->sync_lock);
 	del_timer_sync(&ehci->watchdog);
 	del_timer_sync(&ehci->iaa_watchdog);
@@ -294,6 +297,7 @@ static void tegra_ehci_shutdown(struct usb_hcd *hcd)
 		spin_unlock_irq(&ehci->lock);
 	}
 	mutex_unlock(&tegra->sync_lock);
+	pr_info("%s instance %d -\n", __func__, tegra->phy->inst);
 }
 
 static int tegra_ehci_setup(struct usb_hcd *hcd)
@@ -342,9 +346,13 @@ static int tegra_ehci_bus_suspend(struct usb_hcd *hcd)
 	struct tegra_ehci_hcd *tegra = dev_get_drvdata(hcd->self.controller);
 	int err = 0;
 	EHCI_DBG("%s() BEGIN\n", __func__);
+	pr_info("%s instance %d +\n", __func__, tegra->phy->inst);
+
 	mutex_lock(&tegra->sync_lock);
 	tegra->bus_suspended_fail = false;
+	pr_info("%s : ehci_bus_suspend +\n", __func__);
 	err = ehci_bus_suspend(hcd);
+	pr_info("%s : ehci_bus_suspend, err = %d -\n", __func__, err);
 	if (err)
 		tegra->bus_suspended_fail = true;
 	else
@@ -352,6 +360,7 @@ static int tegra_ehci_bus_suspend(struct usb_hcd *hcd)
 	mutex_unlock(&tegra->sync_lock);
 	EHCI_DBG("%s() END\n", __func__);
 
+	pr_info("%s instance %d -\n", __func__, tegra->phy->inst);
 	return err;
 }
 
@@ -361,12 +370,14 @@ static int tegra_ehci_bus_resume(struct usb_hcd *hcd)
 	int err = 0;
 	EHCI_DBG("%s() BEGIN\n", __func__);
 
+	pr_info("%s instance %d +\n", __func__, tegra->phy->inst);
 	mutex_lock(&tegra->sync_lock);
 	tegra_usb_phy_resume(tegra->phy);
 	err = ehci_bus_resume(hcd);
 	mutex_unlock(&tegra->sync_lock);
 	EHCI_DBG("%s() END\n", __func__);
 
+	pr_info("%s instance %d -\n", __func__, tegra->phy->inst);
 	return err;
 }
 #endif
@@ -410,6 +421,8 @@ static int tegra_ehci_probe(struct platform_device *pdev)
 	struct tegra_ehci_hcd *tegra;
 	int err = 0;
 	int irq;
+
+	printk(KERN_INFO "%s + #####\n", __func__);
 
 	tegra = devm_kzalloc(&pdev->dev, sizeof(struct tegra_ehci_hcd),
 		GFP_KERNEL);
@@ -478,14 +491,14 @@ static int tegra_ehci_probe(struct platform_device *pdev)
 		goto fail_phy;
 	}
 
-	err = enable_irq_wake(tegra->irq);
+	/*err = enable_irq_wake(tegra->irq);
 	if (err < 0) {
 		dev_warn(&pdev->dev,
 				"Couldn't enable USB host mode wakeup, irq=%d, "
 				"error=%d\n", irq, err);
 		err = 0;
 		tegra->irq = 0;
-	}
+	}*/
 
 	tegra->ehci = hcd_to_ehci(hcd);
 
@@ -496,6 +509,8 @@ static int tegra_ehci_probe(struct platform_device *pdev)
 			otg_set_host(tegra->transceiver, &hcd->self);
 	}
 #endif
+
+	printk(KERN_INFO "%s - #####\n", __func__);
 	return err;
 
 fail_phy:
@@ -513,19 +528,30 @@ fail_io:
 static int tegra_ehci_resume(struct platform_device *pdev)
 {
 	struct tegra_ehci_hcd *tegra = platform_get_drvdata(pdev);
+	int ret;
 
-	return tegra_usb_phy_power_on(tegra->phy);
+	pr_info("%s instance %d +\n", __func__, tegra->phy->inst);
+	ret = tegra_usb_phy_power_on(tegra->phy);
+	pr_info("%s instance %d, ret %d-\n", __func__, tegra->phy->inst, ret);
+	return ret;
 }
 
 static int tegra_ehci_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct tegra_ehci_hcd *tegra = platform_get_drvdata(pdev);
+	int ret;
 
+	pr_info("%s instance %d, bus_suspended_fail %d +\n", __func__, tegra->phy->inst, tegra->bus_suspended_fail);
 	/* bus suspend could have failed because of remote wakeup resume */
-	if (tegra->bus_suspended_fail)
-		return -EBUSY;
-	else
-		return tegra_usb_phy_power_off(tegra->phy);
+	if (tegra->bus_suspended_fail) {
+		ret = -EBUSY;
+		pr_info("%s instance %d, ret %d-\n", __func__, tegra->phy->inst, ret);
+		return ret;
+	} else {
+		ret = tegra_usb_phy_power_off(tegra->phy);
+		pr_info("%s instance %d, ret %d-\n", __func__, tegra->phy->inst, ret);
+		return ret;
+	}
 }
 #endif
 
@@ -544,8 +570,8 @@ static int tegra_ehci_remove(struct platform_device *pdev)
 	}
 #endif
 
-	if (tegra->irq)
-		disable_irq_wake(tegra->irq);
+	//if (tegra->irq)
+	//	disable_irq_wake(tegra->irq);
 	usb_remove_hcd(hcd);
 	usb_put_hcd(hcd);
 	tegra_usb_phy_power_off(tegra->phy);
@@ -560,8 +586,12 @@ static void tegra_ehci_hcd_shutdown(struct platform_device *pdev)
 	struct tegra_ehci_hcd *tegra = platform_get_drvdata(pdev);
 	struct usb_hcd *hcd = ehci_to_hcd(tegra->ehci);
 
+	pr_info("%s instance %d +\n", __func__, tegra->phy->inst);
+
 	if (hcd->driver->shutdown)
 		hcd->driver->shutdown(hcd);
+
+	pr_info("%s instance %d -\n", __func__, tegra->phy->inst);
 }
 
 static struct platform_driver tegra_ehci_driver = {

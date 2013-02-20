@@ -153,8 +153,9 @@ config MACH_ARUBA
 config MACH_CARDHU
        bool "Cardhu board"
        depends on ARCH_TEGRA_3x_SOC
+       select MACH_HAS_SND_SOC_TEGRA_RT5631 if SND_SOC
        select MACH_HAS_SND_SOC_TEGRA_WM8903 if SND_SOC
-       select MACH_HAS_SND_SOC_TEGRA_TLV320AIC326X if SND_SOC
+       select MACH_HAS_SND_SOC_TEGRA_RT5642 if SND_SOC
        select MACH_HAS_SND_SOC_TEGRA_MAX98095 if SND_SOC
        help
          Support for NVIDIA Cardhu development platform
@@ -352,6 +353,10 @@ config TEGRA_THERMAL_THROTTLE
 	help
 	  Also requires enabling a temperature sensor such as NCT1008.
 
+config DEBUG_ASUS
+	bool "For ASUS user-debug build"
+	help
+	  Say Y here for user-debug build.
 config WIFI_CONTROL_FUNC
 	bool "Enable WiFi control function abstraction"
 	help

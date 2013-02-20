@@ -656,7 +656,7 @@ err:
 		dvc_writel(i2c_dev, DVC_STATUS_I2C_DONE_INTR, DVC_STATUS);
 		dvc_readl(i2c_dev, DVC_STATUS);
 	}
-	
+
 	/*
 	 * ensure that the writes above post prior to leaving the interrupt
 	 * handler. Otherwise, the interrupt can still be pending in the gic

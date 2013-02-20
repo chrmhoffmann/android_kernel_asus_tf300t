@@ -631,10 +631,11 @@ static void cpufreq_interactive_boost(void)
 
 	for_each_online_cpu(i) {
 		pcpu = &per_cpu(cpuinfo, i);
-
+		//printk("CPU%d cur:%d\n",i,pcpu->policy->cur);
 		if (pcpu->target_freq < hispeed_freq) {
 			pcpu->target_freq = hispeed_freq;
 			cpumask_set_cpu(i, &up_cpumask);
+			//printk("CPU%d boost\n",i);
 			anyboost = 1;
 		}
 
