@@ -79,16 +79,11 @@
 
 static unsigned int tegra_sdhost_min_freq;
 static unsigned int tegra_sdhost_std_freq;
-
-#ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra_3x_sdhci_set_card_clock(struct sdhci_host *sdhci, unsigned int clock);
 static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci);
-#endif
 
-#ifndef CONFIG_ARCH_TEGRA_2x_SOC
 static unsigned int tegra3_sdhost_max_clk[4] = {
 	208000000,	104000000,	208000000,	104000000 };
-#endif
 
 struct tegra_sdhci_hw_ops{
 	/* Set the internal clk and card clk.*/
@@ -178,7 +173,6 @@ static unsigned int tegra_sdhci_get_ro(struct sdhci_host *sdhci)
 	return gpio_get_value(plat->wp_gpio);
 }
 
-#ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci)
 {
 	u16 misc_ctrl;
@@ -215,7 +209,6 @@ static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci)
 		SDHCI_VENDOR_MISC_CNTRL_ENABLE_SDR50_SUPPORT;
 	sdhci_writew(sdhci, misc_ctrl, SDHCI_VENDOR_MISC_CNTRL);
 }
-#endif /*	#ifdef CONFIG_ARCH_TEGRA_3x_SOC */
 
 static int tegra_sdhci_set_uhs_signaling(struct sdhci_host *host,
 		unsigned int uhs)
@@ -400,7 +393,7 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 	clk_set_rate(pltfm_host->clk, clk_rate);
 	sdhci->max_clk = clk_get_rate(pltfm_host->clk);
 }
-#ifdef CONFIG_ARCH_TEGRA_3x_SOC
+
 static void tegra_3x_sdhci_set_card_clock(struct sdhci_host *sdhci, unsigned int clock)
 {
 	int div;
@@ -485,7 +478,6 @@ set_clk:
 out:
 	sdhci->clock = clock;
 }
-#endif /*	#ifdef CONFIG_ARCH_TEGRA_3x_SOC */
 
 static void tegra_sdhci_set_clock(struct sdhci_host *sdhci, unsigned int clock)
 {
@@ -882,6 +874,7 @@ static int tegra_sdhci_suspend(struct sdhci_host *sdhci, pm_message_t state)
 		}
 	}
 
+skip:
 	if((project_info == TEGRA3_PROJECT_TF300T || project_info == TEGRA3_PROJECT_TF300TL || project_info == TEGRA3_PROJECT_TF300TG) && !strcmp(mmc_hostname(sdhci->mmc), "mmc0")) {
 		MMC_printk("%s: pull up data pin", mmc_hostname(sdhci->mmc));
 
@@ -1049,6 +1042,7 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 				"failed to allocate power gpio\n");
 			goto err_power_req;
 		}
+		tegra_gpio_enable(plat->power_gpio);
 		gpio_direction_output(plat->power_gpio, 1);
 	}
 
@@ -1059,6 +1053,7 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 				"failed to allocate cd gpio\n");
 			goto err_cd_req;
 		}
+		tegra_gpio_enable(plat->cd_gpio);
 		gpio_direction_input(plat->cd_gpio);
 
 		tegra_host->card_present = (gpio_get_value(plat->cd_gpio) == 0);
@@ -1098,6 +1093,7 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 				"failed to allocate wp gpio\n");
 			goto err_wp_req;
 		}
+		tegra_gpio_enable(plat->wp_gpio);
 		gpio_direction_input(plat->wp_gpio);
 	}
 
@@ -1230,6 +1226,12 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 	host->mmc->caps |= MMC_CAP_BKOPS;
 #endif
 
+#ifdef CONFIG_MMC_EMBEDDED_SDIO
+	/* Do not turn OFF embedded sdio cards as it support Wake on Wireless */
+	if (plat->mmc_data.embedded_sdio)
+		host->mmc->pm_flags |= MMC_PM_KEEP_POWER;
+#endif
+
 	tegra_sdhost_min_freq = TEGRA_SDHOST_MIN_FREQ;
 #ifdef CONFIG_ARCH_TEGRA_2x_SOC
 	tegra_host->hw_ops = &tegra_2x_sdhci_ops;
@@ -1251,17 +1253,23 @@ err_add_host:
 err_clk_put:
 	clk_put(pltfm_host->clk);
 err_clk_get:
-	if (gpio_is_valid(plat->wp_gpio))
+	if (gpio_is_valid(plat->wp_gpio)) {
+		tegra_gpio_disable(plat->wp_gpio);
 		gpio_free(plat->wp_gpio);
+	}
 err_wp_req:
 	if (gpio_is_valid(plat->cd_gpio))
 		free_irq(gpio_to_irq(plat->cd_gpio), host);
 err_cd_irq_req:
-	if (gpio_is_valid(plat->cd_gpio))
+	if (gpio_is_valid(plat->cd_gpio)) {
+		tegra_gpio_disable(plat->cd_gpio);
 		gpio_free(plat->cd_gpio);
+	}
 err_cd_req:
-	if (gpio_is_valid(plat->power_gpio))
+	if (gpio_is_valid(plat->power_gpio)) {
+		tegra_gpio_disable(plat->power_gpio);
 		gpio_free(plat->power_gpio);
+	}
 err_power_req:
 err_no_mem:
 	kfree(tegra_host);
@@ -1294,16 +1302,21 @@ static int __devexit sdhci_tegra_remove(struct platform_device *pdev)
 		regulator_put(tegra_host->vdd_io_reg);
 	}
 
-	if (gpio_is_valid(plat->wp_gpio))
+	if (gpio_is_valid(plat->wp_gpio)) {
+		tegra_gpio_disable(plat->wp_gpio);
 		gpio_free(plat->wp_gpio);
+	}
 
 	if (gpio_is_valid(plat->cd_gpio)) {
 		free_irq(gpio_to_irq(plat->cd_gpio), host);
+		tegra_gpio_disable(plat->cd_gpio);
 		gpio_free(plat->cd_gpio);
 	}
 
-	if (gpio_is_valid(plat->power_gpio))
+	if (gpio_is_valid(plat->power_gpio)) {
+		tegra_gpio_disable(plat->power_gpio);
 		gpio_free(plat->power_gpio);
+	}
 
 	if (tegra_host->clk_enabled)
 		clk_disable(pltfm_host->clk);
