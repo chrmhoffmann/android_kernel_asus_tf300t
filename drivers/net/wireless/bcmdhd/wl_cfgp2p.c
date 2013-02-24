@@ -356,11 +356,11 @@ wl_cfgp2p_ifadd(struct wl_priv *wl, struct ether_addr *mac, u8 if_type,
 		wl->ioctl_buf, WLC_IOCTL_MAXLEN, &wl->ioctl_buf_sync);
 
 	if (unlikely(err < 0)) {
-		printf("'wl p2p_ifadd' error %d\n", err);
+		printk("'wl p2p_ifadd' error %d\n", err);
 	} else if (if_type == WL_P2P_IF_GO) {
 		err = wldev_ioctl(ndev, WLC_SET_SCB_TIMEOUT, &scb_timeout, sizeof(u32), true);
 		if (unlikely(err < 0))
-			printf("'wl scb_timeout' error %d\n", err);
+			printk("'wl scb_timeout' error %d\n", err);
 	}
 
 	return err;
@@ -416,11 +416,11 @@ wl_cfgp2p_ifchange(struct wl_priv *wl, struct ether_addr *mac, u8 if_type,
 		wl->ioctl_buf, WLC_IOCTL_MAXLEN, &wl->ioctl_buf_sync);
 
 	if (unlikely(err < 0)) {
-		printf("'wl p2p_ifupd' error %d\n", err);
+		printk("'wl p2p_ifupd' error %d\n", err);
 	} else if (if_type == WL_P2P_IF_GO) {
 		err = wldev_ioctl(netdev, WLC_SET_SCB_TIMEOUT, &scb_timeout, sizeof(u32), true);
 		if (unlikely(err < 0))
-			printf("'wl scb_timeout' error %d\n", err);
+			printk("'wl scb_timeout' error %d\n", err);
 	}
 	return err;
 }
@@ -846,10 +846,12 @@ exit:
 /* Check whether the given IE looks like WFA P2P IE. */
 #define wl_cfgp2p_is_p2p_ie(ie, tlvs, len)	wl_cfgp2p_has_ie(ie, tlvs, len, \
 		(const uint8 *)WFA_OUI, WFA_OUI_LEN, WFA_OUI_TYPE_P2P)
-/* Check whether the given IE looks like WFA WFDisplay IE. */
-#define WFA_OUI_TYPE_WFD	0x0a	/* WiFi Display OUI TYPE */
-#define wl_cfgp2p_is_wfd_ie(ie, tlvs, len)	wl_cfgp2p_has_ie(ie, tlvs, len, \
-		(const uint8 *)WFA_OUI, WFA_OUI_LEN, WFA_OUI_TYPE_WFD)
+#ifdef WLWFDIE
+ /* Check whether the given IE looks like WFA WFDisplay IE. */
+#define WFA_OUI_TYPE_WFD		 0x0a	 /* WiFi Display OUI TYPE */
+#define wl_cfgp2p_is_wfd_ie(ie, tlvs, len) 	 wl_cfgp2p_has_ie(ie, tlvs, len, \
+		 (const uint8 *)WFA_OUI, WFA_OUI_LEN, WFA_OUI_TYPE_WFD)
+#endif /* WLWFDIE */
 /* Delete and Set a management vndr ie to firmware
  * Parameters:
  * @wl       : wl_private data
@@ -975,8 +977,12 @@ wl_cfgp2p_set_management_ie(struct wl_priv *wl, struct net_device *ndev, s32 bss
 				ie_len = ie_buf[pos++];
 				if ((ie_id == DOT11_MNG_VS_ID) &&
 				   (wl_cfgp2p_is_wps_ie(&ie_buf[pos-2], NULL, 0) ||
+#ifdef WLWFDIE
 					wl_cfgp2p_is_p2p_ie(&ie_buf[pos-2], NULL, 0) ||
 					wl_cfgp2p_is_wfd_ie(&ie_buf[pos-2], NULL, 0))) {
+#else
+					wl_cfgp2p_is_p2p_ie(&ie_buf[pos-2], NULL, 0))) {
+#endif /* WLWFDIE */
 					CFGP2P_INFO(("DELELED ID : %d, Len : %d , OUI :"
 						"%02x:%02x:%02x\n", ie_id, ie_len, ie_buf[pos],
 						ie_buf[pos+1], ie_buf[pos+2]));
@@ -1002,8 +1008,12 @@ wl_cfgp2p_set_management_ie(struct wl_priv *wl, struct net_device *ndev, s32 bss
 				ie_len = ie_buf[pos++];
 				if ((ie_id == DOT11_MNG_VS_ID) &&
 				   (wl_cfgp2p_is_wps_ie(&ie_buf[pos-2], NULL, 0) ||
+#ifdef WLWFDIE
 					wl_cfgp2p_is_p2p_ie(&ie_buf[pos-2], NULL, 0) ||
 					wl_cfgp2p_is_wfd_ie(&ie_buf[pos-2], NULL, 0))) {
+#else
+					wl_cfgp2p_is_p2p_ie(&ie_buf[pos-2], NULL, 0))) {
+#endif /* WLWFDIE */
 					CFGP2P_INFO(("ADDED ID : %d, Len : %d , OUI :"
 						"%02x:%02x:%02x\n", ie_id, ie_len, ie_buf[pos],
 						ie_buf[pos+1], ie_buf[pos+2]));
@@ -1113,18 +1123,21 @@ wl_cfgp2p_find_p2pie(u8 *parse, u32 len)
 	}
 	return NULL;
 }
+
+#ifdef WLWFDIE
 wifi_wfd_ie_t *
 wl_cfgp2p_find_wfdie(u8 *parse, u32 len)
 {
 	bcm_tlv_t *ie;
 
 	while ((ie = bcm_parse_tlvs(parse, (int)len, DOT11_MNG_VS_ID))) {
-	if (wl_cfgp2p_is_wfd_ie((uint8*)ie, &parse, &len)) {
+		if (wl_cfgp2p_is_wfd_ie((uint8*)ie, &parse, &len)) {
 			return (wifi_wfd_ie_t *)ie;
 		}
 	}
 	return NULL;
 }
+#endif /* WLWFDIE */
 
 static s32
 wl_cfgp2p_vndr_ie(struct wl_priv *wl, struct net_device *ndev, s32 bssidx, s32 pktflag,

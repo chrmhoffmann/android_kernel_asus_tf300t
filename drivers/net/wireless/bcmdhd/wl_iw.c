@@ -6341,7 +6341,8 @@ wl_iw_set_cscan(
 			else {
 				WL_ERROR(("%s Ignoring CSCAN : First Scan is not done yet %d\n",
 					__FUNCTION__, g_first_counter_scans));
-				return -EBUSY;
+				res = -EBUSY;
+				goto exit_proc;
 			}
 		}
 #endif 

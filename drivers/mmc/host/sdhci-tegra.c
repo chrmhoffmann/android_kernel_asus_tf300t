@@ -83,7 +83,9 @@ static unsigned int tegra_sdhost_std_freq;
 #ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra_3x_sdhci_set_card_clock(struct sdhci_host *sdhci, unsigned int clock);
 static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci);
+#endif
 
+#ifndef CONFIG_ARCH_TEGRA_2x_SOC
 static unsigned int tegra3_sdhost_max_clk[4] = {
 	208000000,	104000000,	208000000,	104000000 };
 #endif
@@ -213,7 +215,7 @@ static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci)
 		SDHCI_VENDOR_MISC_CNTRL_ENABLE_SDR50_SUPPORT;
 	sdhci_writew(sdhci, misc_ctrl, SDHCI_VENDOR_MISC_CNTRL);
 }
-#endif
+#endif /*	#ifdef CONFIG_ARCH_TEGRA_3x_SOC */
 
 static int tegra_sdhci_set_uhs_signaling(struct sdhci_host *host,
 		unsigned int uhs)
@@ -360,14 +362,7 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 	unsigned int clk_rate;
 	unsigned int emc_clk;
 
-	/*
-	 * In SDR50 mode, run the sdmmc controller at freq greater than
-	 * 104MHz to ensure the core voltage is at 1.2V. If the core voltage
-	 * is below 1.2V, CRC errors would occur during data transfers.
-	 */
-	if (sdhci->mmc->card &&
-		(mmc_card_ddr_mode(sdhci->mmc->card) ||
-		(sdhci->mmc->ios.timing == MMC_TIMING_UHS_SDR50))) {
+	if (sdhci->mmc->ios.timing == MMC_TIMING_UHS_DDR50) {
 		/*
 		 * In ddr mode, tegra sdmmc controller clock frequency
 		 * should be double the card clock frequency.
@@ -382,6 +377,13 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 		} else {
 			clk_rate = clock * 2;
 		}
+	} else 	if (sdhci->mmc->ios.timing == MMC_TIMING_UHS_SDR50) {
+		/*
+		 * In SDR50 mode, run the sdmmc controller at freq greater than
+		 * 104MHz to ensure the core voltage is at 1.2V. If the core voltage
+		 * is below 1.2V, CRC errors would occur during data transfers.
+		 */
+		clk_rate = clock * 2;
 	} else {
 		if (clock <= tegra_sdhost_min_freq)
 			clk_rate = tegra_sdhost_min_freq;
@@ -398,7 +400,6 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 	clk_set_rate(pltfm_host->clk, clk_rate);
 	sdhci->max_clk = clk_get_rate(pltfm_host->clk);
 }
-
 #ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra_3x_sdhci_set_card_clock(struct sdhci_host *sdhci, unsigned int clock)
 {
@@ -484,7 +485,7 @@ set_clk:
 out:
 	sdhci->clock = clock;
 }
-#endif
+#endif /*	#ifdef CONFIG_ARCH_TEGRA_3x_SOC */
 
 static void tegra_sdhci_set_clock(struct sdhci_host *sdhci, unsigned int clock)
 {
@@ -661,35 +662,14 @@ static void sdhci_tegra_set_tap_delay(struct sdhci_host *sdhci,
 	sdhci_writel(sdhci, vendor_ctrl, SDHCI_VENDOR_CLOCK_CNTRL);
 }
 
-static void sdhci_tegra_clear_set_irqs(struct sdhci_host *host,
-	u32 clear, u32 set)
-{
-	u32 ier;
-
-	ier = sdhci_readl(host, SDHCI_INT_ENABLE);
-	ier &= ~clear;
-	ier |= set;
-	sdhci_writel(host, ier, SDHCI_INT_ENABLE);
-	sdhci_writel(host, ier, SDHCI_SIGNAL_ENABLE);
-}
-
 static int sdhci_tegra_run_frequency_tuning(struct sdhci_host *sdhci)
 {
 	int err = 0;
 	u8 ctrl;
-	u32 ier;
 	u32 mask;
 	unsigned int timeout = 10;
 	int flags;
 	u32 intstatus;
-
-	/*
-	 * As per the Host Controller spec v3.00, tuning command
-	 * generates Buffer Read Ready interrupt only, so enable that.
-	 */
-	ier = sdhci_readl(sdhci, SDHCI_INT_ENABLE);
-	sdhci_tegra_clear_set_irqs(sdhci, ier, SDHCI_INT_DATA_AVAIL |
-		SDHCI_INT_DATA_CRC);
 
 	mask = SDHCI_CMD_INHIBIT | SDHCI_DATA_INHIBIT;
 	while (sdhci_readl(sdhci, SDHCI_PRESENT_STATE) & mask) {
@@ -762,7 +742,6 @@ static int sdhci_tegra_run_frequency_tuning(struct sdhci_host *sdhci)
 	}
 	mdelay(1);
 out:
-	sdhci_tegra_clear_set_irqs(sdhci, SDHCI_INT_DATA_AVAIL, ier);
 	return err;
 }
 
@@ -776,6 +755,7 @@ static int sdhci_tegra_execute_tuning(struct sdhci_host *sdhci)
 	unsigned int temp_pass_window = 0;
 	unsigned int best_low_pass_tap = 0;
 	unsigned int best_pass_window = 0;
+	u32 ier;
 
 	/* Tuning is valid only in SDR104 and SDR50 modes */
 	ctrl_2 = sdhci_readw(sdhci, SDHCI_HOST_CONTROL2);
@@ -788,9 +768,18 @@ static int sdhci_tegra_execute_tuning(struct sdhci_host *sdhci)
 	if (tap_delay_status == NULL) {
 		dev_err(mmc_dev(sdhci->mmc), "failed to allocate memory"
 			"for storing tap_delay_status\n");
-		err = -ENOMEM;
-		goto out;
+		return -ENOMEM;
 	}
+
+	/*
+	 * Disable all interrupts signalling.Enable interrupt status
+	 * detection for buffer read ready and data crc. We use
+	 * polling for tuning as it involves less overhead.
+	 */
+	ier = sdhci_readl(sdhci, SDHCI_INT_ENABLE);
+	sdhci_writel(sdhci, 0, SDHCI_SIGNAL_ENABLE);
+	sdhci_writel(sdhci, SDHCI_INT_DATA_AVAIL |
+		SDHCI_INT_DATA_CRC, SDHCI_INT_ENABLE);
 
 	/*
 	 * Set each tap delay value and run frequency tuning. After each
@@ -843,7 +832,10 @@ static int sdhci_tegra_execute_tuning(struct sdhci_host *sdhci)
 	/* Run frequency tuning */
 	err = sdhci_tegra_run_frequency_tuning(sdhci);
 
-out:
+	/* Enable the normal interrupts signalling */
+	sdhci_writel(sdhci, ier, SDHCI_INT_ENABLE);
+	sdhci_writel(sdhci, ier, SDHCI_SIGNAL_ENABLE);
+
 	if (tap_delay_status)
 		kfree(tap_delay_status);
 
@@ -890,7 +882,6 @@ static int tegra_sdhci_suspend(struct sdhci_host *sdhci, pm_message_t state)
 		}
 	}
 
-skip:
 	if((project_info == TEGRA3_PROJECT_TF300T || project_info == TEGRA3_PROJECT_TF300TL || project_info == TEGRA3_PROJECT_TF300TG) && !strcmp(mmc_hostname(sdhci->mmc), "mmc0")) {
 		MMC_printk("%s: pull up data pin", mmc_hostname(sdhci->mmc));
 
@@ -912,6 +903,7 @@ skip:
                 gpio_direction_output(TEGRA_GPIO_PAA6, 1);
                 gpio_direction_output(TEGRA_GPIO_PAA7, 1);
 	}
+
 	return 0;
 }
 
@@ -984,9 +976,6 @@ static struct sdhci_ops tegra_sdhci_ops = {
 	.read_w     = tegra_sdhci_readw,
 	.write_l    = tegra_sdhci_writel,
 	.platform_8bit_width = tegra_sdhci_8bit,
-#ifdef CONFIG_ARCH_TEGRA_3x_SOC
-	.set_card_clock = tegra_3x_sdhci_set_card_clock,
-#endif
 	.set_clock  = tegra_sdhci_set_clock,
 	.suspend    = tegra_sdhci_suspend,
 	.resume     = tegra_sdhci_resume,
@@ -1060,7 +1049,6 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 				"failed to allocate power gpio\n");
 			goto err_power_req;
 		}
-		tegra_gpio_enable(plat->power_gpio);
 		gpio_direction_output(plat->power_gpio, 1);
 	}
 
@@ -1071,7 +1059,6 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 				"failed to allocate cd gpio\n");
 			goto err_cd_req;
 		}
-		tegra_gpio_enable(plat->cd_gpio);
 		gpio_direction_input(plat->cd_gpio);
 
 		tegra_host->card_present = (gpio_get_value(plat->cd_gpio) == 0);
@@ -1111,7 +1098,6 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 				"failed to allocate wp gpio\n");
 			goto err_wp_req;
 		}
-		tegra_gpio_enable(plat->wp_gpio);
 		gpio_direction_input(plat->wp_gpio);
 	}
 
@@ -1244,12 +1230,6 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 	host->mmc->caps |= MMC_CAP_BKOPS;
 #endif
 
-#ifdef CONFIG_MMC_EMBEDDED_SDIO
-	/* Do not turn OFF embedded sdio cards as it support Wake on Wireless */
-	if (plat->mmc_data.embedded_sdio)
-		host->mmc->pm_flags |= MMC_PM_KEEP_POWER;
-#endif
-
 	tegra_sdhost_min_freq = TEGRA_SDHOST_MIN_FREQ;
 #ifdef CONFIG_ARCH_TEGRA_2x_SOC
 	tegra_host->hw_ops = &tegra_2x_sdhci_ops;
@@ -1271,23 +1251,17 @@ err_add_host:
 err_clk_put:
 	clk_put(pltfm_host->clk);
 err_clk_get:
-	if (gpio_is_valid(plat->wp_gpio)) {
-		tegra_gpio_disable(plat->wp_gpio);
+	if (gpio_is_valid(plat->wp_gpio))
 		gpio_free(plat->wp_gpio);
-	}
 err_wp_req:
 	if (gpio_is_valid(plat->cd_gpio))
 		free_irq(gpio_to_irq(plat->cd_gpio), host);
 err_cd_irq_req:
-	if (gpio_is_valid(plat->cd_gpio)) {
-		tegra_gpio_disable(plat->cd_gpio);
+	if (gpio_is_valid(plat->cd_gpio))
 		gpio_free(plat->cd_gpio);
-	}
 err_cd_req:
-	if (gpio_is_valid(plat->power_gpio)) {
-		tegra_gpio_disable(plat->power_gpio);
+	if (gpio_is_valid(plat->power_gpio))
 		gpio_free(plat->power_gpio);
-	}
 err_power_req:
 err_no_mem:
 	kfree(tegra_host);
@@ -1320,21 +1294,16 @@ static int __devexit sdhci_tegra_remove(struct platform_device *pdev)
 		regulator_put(tegra_host->vdd_io_reg);
 	}
 
-	if (gpio_is_valid(plat->wp_gpio)) {
-		tegra_gpio_disable(plat->wp_gpio);
+	if (gpio_is_valid(plat->wp_gpio))
 		gpio_free(plat->wp_gpio);
-	}
 
 	if (gpio_is_valid(plat->cd_gpio)) {
 		free_irq(gpio_to_irq(plat->cd_gpio), host);
-		tegra_gpio_disable(plat->cd_gpio);
 		gpio_free(plat->cd_gpio);
 	}
 
-	if (gpio_is_valid(plat->power_gpio)) {
-		tegra_gpio_disable(plat->power_gpio);
+	if (gpio_is_valid(plat->power_gpio))
 		gpio_free(plat->power_gpio);
-	}
 
 	if (tegra_host->clk_enabled)
 		clk_disable(pltfm_host->clk);

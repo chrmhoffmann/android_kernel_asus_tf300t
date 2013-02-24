@@ -2,6 +2,7 @@
  * arch/arm/mach-tegra/board-cardhu.c
  *
  * Copyright (c) 2011-2012, NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2011-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -51,6 +52,7 @@
 #include <sound/wm8903.h>
 #include <sound/max98095.h>
 #include <media/tegra_dtv.h>
+#include <media/tegra_camera.h>
 
 #include <mach/clk.h>
 #include <mach/iomap.h>
@@ -600,6 +602,9 @@ static void __init cardhu_uart_init(void)
 {
 	struct clk *c;
 	int i;
+	struct board_info board_info;
+
+	tegra_get_board_info(&board_info);
 
 	for (i = 0; i < ARRAY_SIZE(uart_parent_clk); ++i) {
 		c = tegra_get_clock_by_name(uart_parent_clk[i].name);
@@ -651,10 +656,27 @@ static void __init cardhu_uart_init(void)
 				ARRAY_SIZE(cardhu_uart_devices));
 }
 
+static struct tegra_camera_platform_data tegra_camera_pdata = {
+	.limit_3d_emc_clk = false,
+};
+
 static struct platform_device tegra_camera = {
 	.name = "tegra_camera",
+	.dev = {
+		.platform_data = &tegra_camera_pdata,
+	},
 	.id = -1,
 };
+
+static void tegra_camera_init(void)
+{
+	/* For AP37 platform, limit 3d and emc freq when camera is ON */
+	if (TEGRA_REVISION_A03 == tegra_get_revision() &&
+		0xA0 == tegra_sku_id())
+		tegra_camera_pdata.limit_3d_emc_clk = true;
+	else
+		tegra_camera_pdata.limit_3d_emc_clk = false;
+}
 
 static struct platform_device *cardhu_spi_devices[] __initdata = {
 	&tegra_spi_device4,
@@ -748,12 +770,25 @@ static struct platform_device tegra_rtc_device = {
 	.num_resources = ARRAY_SIZE(tegra_rtc_resources),
 };
 
-static struct tegra_wm8903_platform_data cardhu_audio_wm8903_pdata = {
+static struct tegra_asoc_platform_data cardhu_audio_wm8903_pdata = {
 	.gpio_spkr_en		= TEGRA_GPIO_SPKR_EN,
 	.gpio_hp_det		= TEGRA_GPIO_HP_DET,
 	.gpio_hp_mute		= -1,
 	.gpio_int_mic_en	= -1,
 	.gpio_ext_mic_en	= -1,
+	.i2s_param[HIFI_CODEC]	= {
+		.audio_port_id	= 0,
+		.is_i2s_master	= 1,
+		.i2s_mode	= TEGRA_DAIFMT_I2S,
+	},
+	.i2s_param[BASEBAND]	= {
+		.audio_port_id	= -1,
+	},
+	.i2s_param[BT_SCO]	= {
+		.audio_port_id	= 3,
+		.is_i2s_master	= 1,
+		.i2s_mode	= TEGRA_DAIFMT_DSP_A,
+	},
 };
 
 static struct platform_device cardhu_audio_device = {
@@ -776,6 +811,19 @@ static struct tegra_asoc_platform_data cardhu_audio_max98095_pdata = {
 	.gpio_hp_mute		= -1,
 	.gpio_int_mic_en	= -1,
 	.gpio_ext_mic_en	= -1,
+	.i2s_param[HIFI_CODEC]	= {
+		.audio_port_id	= 0,
+		.is_i2s_master	= 1,
+		.i2s_mode	= TEGRA_DAIFMT_I2S,
+	},
+	.i2s_param[BASEBAND]	= {
+		.audio_port_id	= -1,
+	},
+	.i2s_param[BT_SCO]	= {
+		.audio_port_id	= 3,
+		.is_i2s_master	= 1,
+		.i2s_mode	= TEGRA_DAIFMT_DSP_A,
+	},
 };
 
 static struct platform_device cardhu_audio_wm8903_device = {
@@ -809,14 +857,17 @@ static struct tegra_asoc_platform_data cardhu_audio_aic326x_pdata = {
 	.gpio_int_mic_en	= -1,
 	.gpio_ext_mic_en	= -1,
 	/*defaults for Verbier-Cardhu board with TI AIC326X codec*/
-	.audio_port_id		= {
-		[HIFI_CODEC] = 0,
-		[BASEBAND] = -1,
-		[BT_SCO] = 3,
+	.i2s_param[HIFI_CODEC]	= {
+		.audio_port_id	= 0,
+		.is_i2s_master	= 1,
+		.i2s_mode	= TEGRA_DAIFMT_I2S,
+		.sample_size	= 16,
 	},
-	.baseband_param		= {
-		.rate = -1,
-		.channels = -1,
+	.i2s_param[BT_SCO]	= {
+		.sample_size	= 16,
+		.audio_port_id	= 3,
+		.is_i2s_master	= 1,
+		.i2s_mode	= TEGRA_DAIFMT_DSP_A,
 	},
 };
 
@@ -1174,13 +1225,6 @@ static struct tegra_usb_platform_data tegra_ehci2_hsic_xmm_pdata = {
 		.remote_wakeup_supported = false,
 		.power_off_on_suspend = false,
 	},
-	.u_cfg.hsic = {
-		.sync_start_delay = 9,
-		.idle_wait_delay = 17,
-		.term_range_adj = 0,
-		.elastic_underrun_limit = 16,
-		.elastic_overrun_limit = 16,
-	},
 	.ops = &hsic_xmm_plat_ops,
 };
 #endif
@@ -1201,10 +1245,6 @@ void hsic_platform_open(void)
 		gpio_direction_output(hsic_enable_gpio, 0 /* deasserted */);
 	if (!reset_gpio)
 		gpio_direction_output(hsic_reset_gpio, 0 /* asserted */);
-	if (!enable_gpio)
-		tegra_gpio_enable(hsic_enable_gpio);
-	if (!reset_gpio)
-		tegra_gpio_enable(hsic_reset_gpio);
 	/* keep hsic reset asserted for 1 ms */
 	udelay(1000);
 	/* enable (power on) hsic */
@@ -1263,13 +1303,6 @@ static struct tegra_usb_platform_data tegra_ehci2_hsic_pdata = {
 		.hot_plug = false,
 		.remote_wakeup_supported = false,
 		.power_off_on_suspend = false,
-	},
-	.u_cfg.hsic = {
-		.sync_start_delay = 9,
-		.idle_wait_delay = 17,
-		.term_range_adj = 0,
-		.elastic_underrun_limit = 16,
-		.elastic_overrun_limit = 16,
 	},
 	.ops = &hsic_plat_ops,
 };
@@ -1639,6 +1672,7 @@ static void __init tegra_cardhu_init(void)
 	cardhu_edp_init();
 #endif
 	cardhu_uart_init();
+	tegra_camera_init();
 	platform_add_devices(cardhu_devices, ARRAY_SIZE(cardhu_devices));
 	tegra_ram_console_debug_init();
 	cardhu_sdhci_init();
@@ -1680,6 +1714,11 @@ static void __init tegra_cardhu_reserve(void)
 	tegra_ram_console_debug_reserve(SZ_1M);
 }
 
+static const char *cardhu_dt_board_compat[] = {
+	"nvidia,cardhu",
+	NULL
+};
+
 MACHINE_START(CARDHU, "cardhu")
 	.boot_params    = 0x80000100,
 	.map_io         = tegra_map_common_io,
@@ -1688,4 +1727,5 @@ MACHINE_START(CARDHU, "cardhu")
 	.init_irq       = tegra_init_irq,
 	.timer          = &tegra_timer,
 	.init_machine   = tegra_cardhu_init,
+	.dt_compat	= cardhu_dt_board_compat,
 MACHINE_END

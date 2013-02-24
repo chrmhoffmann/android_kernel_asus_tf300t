@@ -1064,13 +1064,9 @@ static int cardhu_dsi_panel_disable(void)
 	} else if (is_panel_218) {
 		gpio_free(cardhu_dsi_pnl_reset);
 	} else if (is_panel_1506) {
-		tegra_gpio_disable(e1506_bl_enb);
 		gpio_free(e1506_bl_enb);
-		tegra_gpio_disable(cardhu_dsi_pnl_reset);
 		gpio_free(cardhu_dsi_pnl_reset);
-		tegra_gpio_disable(e1506_panel_enb);
 		gpio_free(e1506_panel_enb);
-		tegra_gpio_disable(e1506_dsi_vddio);
 		gpio_free(e1506_dsi_vddio);
 	}
 	return err;
@@ -1435,11 +1431,19 @@ static void cardhu_panel_early_suspend(struct early_suspend *h)
 #ifdef CONFIG_PM_DEBUG
 	pr_info("%sed\n", __func__);
 #endif
+
+#ifdef CONFIG_TEGRA_CONVSERVATIVE_GOV_ON_EARLYSUPSEND
+	cpufreq_store_default_gov();
+	cpufreq_change_gov(cpufreq_conservative_gov);
+#endif
 }
 
 static void cardhu_panel_late_resume(struct early_suspend *h)
 {
 	unsigned i;
+#ifdef CONFIG_TEGRA_CONVSERVATIVE_GOV_ON_EARLYSUPSEND
+	cpufreq_restore_default_gov();
+#endif
 	for (i = 0; i < num_registered_fb; i++)
 		fb_blank(registered_fb[i], FB_BLANK_UNBLANK);
 
@@ -1467,6 +1471,9 @@ static void cardhu_panel_preinit(void)
 		cardhu_disp1_out.n_modes = ARRAY_SIZE(cardhu_panel_modes);
 		cardhu_disp1_out.enable = cardhu_panel_enable;
 		cardhu_disp1_out.disable = cardhu_panel_disable;
+		/* Set height and width in mm. */
+		cardhu_disp1_out.height = 125;
+		cardhu_disp1_out.width = 223;
 
 		cardhu_disp1_pdata.fb = &cardhu_fb_data;
 	} else {
@@ -1488,12 +1495,18 @@ static void cardhu_panel_preinit(void)
 				ARRAY_SIZE(cardhu_dsi_modes_218);
 			cardhu_dsi_fb_data.xres = 864;
 			cardhu_dsi_fb_data.yres = 480;
+			/* Set height and width in mm. */
+			cardhu_disp1_out.height = 47;
+			cardhu_disp1_out.width = 84;
 		} else if (is_panel_219) {
 			cardhu_disp1_out.modes	= cardhu_dsi_modes_219;
 			cardhu_disp1_out.n_modes =
 				ARRAY_SIZE(cardhu_dsi_modes_219);
 			cardhu_dsi_fb_data.xres = 540;
 			cardhu_dsi_fb_data.yres = 960;
+			/* Set height and width in mm. */
+			cardhu_disp1_out.height = 95;
+			cardhu_disp1_out.width = 53;
 		} else if (is_panel_1506) {
 			cardhu_disp1_out.modes	= cardhu_dsi_modes_1506;
 			cardhu_disp1_out.n_modes =
@@ -1503,9 +1516,13 @@ static void cardhu_panel_preinit(void)
 			cardhu_dsi.n_suspend_cmd =
 				ARRAY_SIZE(dsi_suspend_cmd_1506);
 			cardhu_dsi.dsi_suspend_cmd = dsi_suspend_cmd_1506;
-			cardhu_dsi.panel_send_dc_frames = true,
+			cardhu_dsi.panel_send_dc_frames = true;
+			cardhu_dsi.suspend_aggr = DSI_HOST_SUSPEND_LV0;
 			cardhu_dsi_fb_data.xres = 720;
 			cardhu_dsi_fb_data.yres = 1280;
+			/* Set height and width in mm. */
+			cardhu_disp1_out.height = 95;
+			cardhu_disp1_out.width = 53;
 		}
 
 		cardhu_disp1_pdata.fb = &cardhu_dsi_fb_data;
@@ -1554,6 +1571,9 @@ int __init cardhu_panel_init(void)
 #else
 		cardhu_disp1_out.depth = 24;
 #endif
+		/* Set height and width in mm. */
+		cardhu_disp1_out.height = 135;
+		cardhu_disp1_out.width = 217;
 		cardhu_fb_data.xres = 1920;
 		cardhu_fb_data.yres = 1200;
 
@@ -1644,7 +1664,6 @@ skip_lvds:
 	gpio_direction_input(cardhu_hdmi_hpd);
 
 #if !(DC_CTRL_MODE & TEGRA_DC_OUT_ONE_SHOT_MODE)
-	tegra_gpio_enable(e1506_lcd_te);
 	gpio_request(e1506_lcd_te, "lcd_te");
 	gpio_direction_input(e1506_lcd_te);
 #endif

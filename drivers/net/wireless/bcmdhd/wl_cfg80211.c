@@ -3490,7 +3490,9 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, struct net_device *ndev,
 	wl_af_params_t *af_params;
 	wifi_p2p_ie_t *p2p_ie;
 	wpa_ie_fixed_t *wps_ie;
+#ifdef WLWFDIE
 	wifi_wfd_ie_t *wfd_ie;
+#endif /* WLWFDIE */
 	scb_val_t scb_val;
 	const struct ieee80211_mgmt *mgmt;
 	struct wl_priv *wl = wiphy_priv(wiphy);
@@ -3499,7 +3501,9 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, struct net_device *ndev,
 	s32 bssidx = 0;
 	u32 p2pie_len = 0;
 	u32 wpsie_len = 0;
+#ifdef WLWFDIE
 	u32 wfdie_len = 0;
+#endif /* WLWFDIE */
 	u32 id;
 	u32 retry = 0;
 	bool ack = false;
@@ -3549,11 +3553,13 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, struct net_device *ndev,
 				/* Total length of P2P Information Element */
 				p2pie_len = p2p_ie->len + sizeof(p2p_ie->len) + sizeof(p2p_ie->id);
 			}
+#ifdef WLWFDIE
 			if ((wfd_ie = wl_cfgp2p_find_wfdie((u8 *)(buf + ie_offset), ie_len))
 				!= NULL) {
 				/* Total length of WFD Information Element */
 				wfdie_len = wfd_ie->len + sizeof(wfd_ie->len) + sizeof(wfd_ie->id);
 			}
+#endif /* WLWFDIE */
 			if ((wps_ie = wl_cfgp2p_find_wpsie((u8 *)(buf + ie_offset), ie_len))
 				!= NULL) {
 				/* Order of Vendor IE is 1) WPS IE +
@@ -3565,7 +3571,11 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, struct net_device *ndev,
 					sizeof(wps_ie->tag);
 				wl_cfgp2p_set_management_ie(wl, dev, bssidx,
 					VNDR_IE_PRBRSP_FLAG,
+#ifdef WLWFDIE
 					(u8 *)wps_ie, wpsie_len + p2pie_len + wfdie_len);
+#else
+					(u8 *)wps_ie, wpsie_len + p2pie_len);
+#endif /* WLWFDIE */
 			}
 			cfg80211_mgmt_tx_status(ndev, *cookie, buf, len, true, GFP_KERNEL);
 			goto exit;
@@ -4074,13 +4084,17 @@ wl_cfg80211_add_set_beacon(struct wiphy *wiphy, struct net_device *dev,
 	wpa_ie_fixed_t *wpa_ie;
 	bcm_tlv_t *wpa2_ie;
 	wifi_p2p_ie_t *p2p_ie;
+#ifdef WLWFDIE
 	wifi_wfd_ie_t *wfd_ie;
+#endif /* WLWFDIE */
 	bool is_bssup = false;
 	bool update_bss = false;
 	bool pbc = false;
 	u16 wpsie_len = 0;
 	u16 p2pie_len = 0;
+#ifdef WLWFDIE
 	u32 wfdie_len = 0;
+#endif /* WLWFDIE */
 	u8 beacon_ie[IE_MAX_LEN];
 	s32 ie_offset = 0;
 	s32 bssidx = 0;
@@ -4138,24 +4152,30 @@ wl_cfg80211_add_set_beacon(struct wiphy *wiphy, struct net_device *dev,
 		} else {
 			WL_ERR(("No P2PIE in beacon \n"));
 		}
+#ifdef WLWFDIE
 		/* find the WFD IEs */
 		if ((wfd_ie = wl_cfgp2p_find_wfdie((u8 *)info->tail, info->tail_len)) != NULL) {
-		/* Total length of P2P Information Element */
-		wfdie_len = wfd_ie->len + sizeof(wfd_ie->len) + sizeof(wfd_ie->id);
-		if ((wpsie_len + p2pie_len + wfdie_len) < IE_MAX_LEN) {
-			memcpy(&beacon_ie[wpsie_len + p2pie_len], wfd_ie, wfdie_len);
-		} else {
+			/* Total length of P2P Information Element */
+			wfdie_len = wfd_ie->len + sizeof(wfd_ie->len) + sizeof(wfd_ie->id);
+			if ((wpsie_len + p2pie_len + wfdie_len) < IE_MAX_LEN) {
+				memcpy(&beacon_ie[wpsie_len + p2pie_len], wfd_ie, wfdie_len);
+			} else {
 				WL_ERR(("Found WFD IE but there is no space, (%d)(%d)(%d)\n",
-				wpsie_len, p2pie_len, wfdie_len));
+					wpsie_len, p2pie_len, wfdie_len));
 				wfdie_len = 0;
 			}
 		} else {
 			WL_ERR(("No WFDIE in beacon \n"));
 		}
+#endif /* WLWFDIE */
 		/* add WLC_E_PROBREQ_MSG event to respose probe_request from STA */
 		wl_add_remove_eventmsg(dev, WLC_E_PROBREQ_MSG, pbc);
 		wl_cfgp2p_set_management_ie(wl, dev, bssidx, VNDR_IE_BEACON_FLAG,
+#ifdef WLWFDIE
 			beacon_ie, wpsie_len + p2pie_len + wfdie_len);
+#else
+			beacon_ie, wpsie_len + p2pie_len);
+#endif /* WLWFDIE */
 
 		/* find the RSN_IE */
 		if ((wpa2_ie = bcm_parse_tlvs((u8 *)info->tail, info->tail_len,
@@ -4679,7 +4699,7 @@ static s32 wl_inform_bss(struct wl_priv *wl)
 
 static s32 wl_inform_single_bss(struct wl_priv *wl, struct wl_bss_info *bi)
 {
-	struct wiphy *wiphy = wiphy_from_scan(wl);
+	struct wiphy *wiphy = wl_to_wiphy(wl);
 	struct ieee80211_mgmt *mgmt;
 	struct ieee80211_channel *channel;
 	struct ieee80211_supported_band *band;
@@ -5158,7 +5178,7 @@ wl_notify_connect_status(struct wl_priv *wl, struct net_device *ndev,
 				}
 			}
 			else if (wl_get_drv_status(wl, CONNECTING, ndev)) {
-				printf("link down, during connecting\n");
+				printk("link down, during connecting\n");
 				if (wl_is_ibssmode(wl, ndev))
 					wl_ibss_join_done(wl, ndev, e, data, false);
 				else
@@ -7139,7 +7159,7 @@ static int wl_construct_reginfo(struct wl_priv *wl, s32 bw_cap)
 					channel |= WL_CHANSPEC_BAND_2G;
 				else
 					channel |= WL_CHANSPEC_BAND_5G;
-  				err = wldev_iovar_getint(dev, "per_chan_info", &channel);
+					err = wldev_iovar_getint(dev, "per_chan_info", &channel);
 				if (!err) {
 					if (channel & WL_CHAN_RADAR) {
 						band_chan_arr[index].flags |= IEEE80211_CHAN_RADAR | IEEE80211_CHAN_NO_IBSS;
@@ -7147,7 +7167,7 @@ static int wl_construct_reginfo(struct wl_priv *wl, s32 bw_cap)
 					if (channel & WL_CHAN_PASSIVE) {
 						band_chan_arr[index].flags |= IEEE80211_CHAN_PASSIVE_SCAN | IEEE80211_CHAN_NO_IBSS;
 					}
-		  		}
+				}
 			}
 
 			if (!update)
@@ -7203,16 +7223,11 @@ s32 wl_update_wiphybands(struct wl_priv *wl)
 		}
 	}
 
-#if 0
 	err = wl_construct_reginfo(wl, bw_cap);
 	if (err) {
 		WL_ERR(("wl_construct_reginfo() fails err=%d\n", err));
-		if (err != BCME_UNSUPPORTED)
-			return err;
-		/* Ignore error if "chanspecs" command is not supported */
-		err = 0;
+		return err;
 	}
-#endif
 	for (i = 1; i <= nband && i < sizeof(bandlist)/sizeof(u32); i++) {
 		index = -1;
 		if (bandlist[i] == WLC_BAND_5G && __wl_band_5ghz_a.n_channels > 0) {

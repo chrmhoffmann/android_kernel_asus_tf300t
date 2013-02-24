@@ -1460,13 +1460,13 @@ typedef struct wl_sampledata {
 } wl_sampledata_t;
 
 
-#define WL_CHAN_VALID_HW    (1 << 0)    
-#define WL_CHAN_VALID_SW    (1 << 1)    
-#define WL_CHAN_BAND_5G     (1 << 2)    
-#define WL_CHAN_RADAR       (1 << 3)    
-#define WL_CHAN_INACTIVE    (1 << 4)    
-#define WL_CHAN_PASSIVE     (1 << 5)    
-#define WL_CHAN_RESTRICTED  (1 << 6)    
+#define WL_CHAN_VALID_HW    (1 << 0)
+#define WL_CHAN_VALID_SW    (1 << 1)
+#define WL_CHAN_BAND_5G     (1 << 2)
+#define WL_CHAN_RADAR       (1 << 3)
+#define WL_CHAN_INACTIVE    (1 << 4)
+#define WL_CHAN_PASSIVE     (1 << 5)
+#define WL_CHAN_RESTRICTED  (1 << 6)
 
 
 #define WL_ERROR_VAL        0x00000001
