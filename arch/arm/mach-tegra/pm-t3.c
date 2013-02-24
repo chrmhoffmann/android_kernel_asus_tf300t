@@ -3,7 +3,7 @@
  *
  * Tegra3 SOC-specific power and cluster management
  *
- * Copyright (c) 2009-2012, NVIDIA Corporation.
+ * Copyright (c) 2009-2012, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -102,12 +102,6 @@
 #define CPU_CLOCK(cpu)	(0x1<<(8+cpu))
 #define CPU_RESET(cpu)	(0x1111ul<<(cpu))
 
-#define PLLX_FO_G (1<<28)
-#define PLLX_FO_LP (1<<29)
-
-#define CLK_RST_CONTROLLER_PLLX_MISC_0 \
-	(IO_ADDRESS(TEGRA_CLK_RESET_BASE) + 0xE4)
-
 static int cluster_switch_prolog_clock(unsigned int flags)
 {
 	u32 reg;
@@ -195,20 +189,6 @@ static int cluster_switch_prolog_clock(unsigned int flags)
 	return 0;
 }
 
-static inline void enable_pllx_cluster_port(void)
-{
-	u32 val = readl(CLK_RST_CONTROLLER_PLLX_MISC_0);
-	val &= (is_lp_cluster()?(~PLLX_FO_G):(~PLLX_FO_LP));
-	writel(val, CLK_RST_CONTROLLER_PLLX_MISC_0);
-}
-
-static inline void disable_pllx_cluster_port(void)
-{
-	u32 val = readl(CLK_RST_CONTROLLER_PLLX_MISC_0);
-	val |= (is_lp_cluster()?PLLX_FO_G:PLLX_FO_LP);
-	writel(val, CLK_RST_CONTROLLER_PLLX_MISC_0);
-}
-
 void tegra_cluster_switch_prolog(unsigned int flags)
 {
 	unsigned int target_cluster = flags & TEGRA_POWER_CLUSTER_MASK;
@@ -243,9 +223,6 @@ void tegra_cluster_switch_prolog(unsigned int flags)
 
 			/* Set up the flow controller to switch CPUs. */
 			reg |= FLOW_CTRL_CPU_CSR_SWITCH_CLUSTER;
-
-			/* Enable target port of PLL_X */
-			enable_pllx_cluster_port();
 		}
 	}
 
@@ -327,9 +304,6 @@ void tegra_cluster_switch_epilog(unsigned int flags)
 		cluster_switch_epilog_actlr();
 		cluster_switch_epilog_gic();
 	}
-
-	/* Disable unused port of PLL_X */
-	disable_pllx_cluster_port();
 
 	#if DEBUG_CLUSTER_SWITCH
 	{
@@ -477,11 +451,11 @@ void tegra_lp0_cpu_mode(bool enter)
 #define PMC_DPD_SAMPLE			0x20
 
 struct tegra_io_dpd tegra_list_io_dpd[] = {
-/* Empty DPD list - sd dpd entries removed */
+	/* sd dpd bits in dpd2 register */
+	IO_DPD_INFO("sdhci-tegra.0",	1,	1), /* SDMMC1 */
+	IO_DPD_INFO("sdhci-tegra.2",	1,	2), /* SDMMC3 */
+	IO_DPD_INFO("sdhci-tegra.3",	1,	3), /* SDMMC4 */
 };
-
-/* we want to cleanup bootloader io dpd setting in kernel */
-static void __iomem *pmc = IO_ADDRESS(TEGRA_PMC_BASE);
 
 #ifdef CONFIG_PM_SLEEP
 struct tegra_io_dpd *tegra_io_dpd_get(struct device *dev)
@@ -489,7 +463,8 @@ struct tegra_io_dpd *tegra_io_dpd_get(struct device *dev)
 	int i;
 	const char *name = dev ? dev_name(dev) : NULL;
 	if (name) {
-		for (i = 0; i < ARRAY_SIZE(tegra_list_io_dpd); i++) {
+		for (i = 0; i < (sizeof(tegra_list_io_dpd) /
+			sizeof(struct tegra_io_dpd)); i++) {
 			if (!(strncmp(tegra_list_io_dpd[i].name, name,
 				strlen(name)))) {
 				return &tegra_list_io_dpd[i];
@@ -501,6 +476,7 @@ struct tegra_io_dpd *tegra_io_dpd_get(struct device *dev)
 	return NULL;
 }
 
+static void __iomem *pmc = IO_ADDRESS(TEGRA_PMC_BASE);
 static DEFINE_SPINLOCK(tegra_io_dpd_lock);
 
 void tegra_io_dpd_enable(struct tegra_io_dpd *hnd)
@@ -509,8 +485,10 @@ void tegra_io_dpd_enable(struct tegra_io_dpd *hnd)
 	unsigned int dpd_status;
 	unsigned int dpd_enable_lsb;
 
-	if ((!hnd))
+	if ((!hnd)) {
+		pr_warn("SD IO DPD handle NULL in %s\n", __func__);
 		return;
+	}
 	spin_lock(&tegra_io_dpd_lock);
 	dpd_enable_lsb = (hnd->io_dpd_reg_index) ? APBDEV_DPD2_ENABLE_LSB :
 						APBDEV_DPD_ENABLE_LSB;
@@ -537,8 +515,10 @@ void tegra_io_dpd_disable(struct tegra_io_dpd *hnd)
 	unsigned int dpd_status;
 	unsigned int dpd_enable_lsb;
 
-	if ((!hnd))
+	if ((!hnd)) {
+		pr_warn("SD IO DPD handle NULL in %s\n", __func__);
 		return;
+	}
 	spin_lock(&tegra_io_dpd_lock);
 	dpd_enable_lsb = (hnd->io_dpd_reg_index) ? APBDEV_DPD2_ENABLE_LSB :
 						APBDEV_DPD_ENABLE_LSB;
@@ -602,39 +582,3 @@ EXPORT_SYMBOL(tegra_io_dpd_get);
 EXPORT_SYMBOL(tegra_io_dpd_enable);
 EXPORT_SYMBOL(tegra_io_dpd_disable);
 EXPORT_SYMBOL(tegra_io_dpd_init);
-
-struct io_dpd_reg_info {
-	u32 req_reg_off;
-	u8 dpd_code_lsb;
-};
-
-static struct io_dpd_reg_info t3_io_dpd_req_regs[] = {
-	{0x1b8, 30},
-	{0x1c0, 5},
-};
-
-/* io dpd off request code */
-#define IO_DPD_CODE_OFF		1
-
-/* cleans io dpd settings from bootloader during kernel init */
-void tegra_bl_io_dpd_cleanup()
-{
-	int i;
-	unsigned int dpd_mask;
-	unsigned int dpd_status;
-
-	pr_info("Clear bootloader IO dpd settings\n");
-	/* clear all dpd requests from bootloader */
-	for (i = 0; i < ARRAY_SIZE(t3_io_dpd_req_regs); i++) {
-		dpd_mask = ((1 << t3_io_dpd_req_regs[i].dpd_code_lsb) - 1);
-		dpd_mask |= (IO_DPD_CODE_OFF <<
-			t3_io_dpd_req_regs[i].dpd_code_lsb);
-		writel(dpd_mask, pmc + t3_io_dpd_req_regs[i].req_reg_off);
-		/* dpd status register is next to req reg in tegra3 */
-		dpd_status = readl(pmc +
-			(t3_io_dpd_req_regs[i].req_reg_off + 4));
-	}
-	return;
-}
-EXPORT_SYMBOL(tegra_bl_io_dpd_cleanup);
-
